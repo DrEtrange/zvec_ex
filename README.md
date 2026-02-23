@@ -16,7 +16,7 @@ Built with [Fine](https://github.com/elixir-nx/fine) for ergonomic C++ NIF integ
 ```elixir
 def deps do
   [
-    {:zvec, "~> 0.1.0"}
+    {:zvec, "~> 0.2.0"}
   ]
 end
 ```
