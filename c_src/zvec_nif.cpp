@@ -201,6 +201,7 @@ static zvec::QuantizeType decode_quantize_type(ErlNifEnv *env,
   if (s == "fp16") return zvec::QuantizeType::FP16;
   if (s == "int8") return zvec::QuantizeType::INT8;
   if (s == "int4") return zvec::QuantizeType::INT4;
+  if (s == "rabitq") return zvec::QuantizeType::RABITQ;
   if (s == "undefined" || s == "nil") return zvec::QuantizeType::UNDEFINED;
   throw std::invalid_argument("unknown quantize_type: " + s);
 }
@@ -284,6 +285,23 @@ static zvec::IndexParams::Ptr decode_index_params(ErlNifEnv *env,
     if (us_term) use_soar = term_to_bool(env, us_term);
     return std::make_shared<zvec::IVFIndexParams>(metric, n_list, n_iters,
                                                   use_soar, quantize);
+  }
+
+  if (type_str == "hnsw_rabitq") {
+    int total_bits = 7;
+    int num_clusters = 16;
+    int m = 16;
+    int ef_construction = 200;
+    auto tb_term = map_get(env, term, "total_bits");
+    if (tb_term) total_bits = static_cast<int>(term_to_int(env, tb_term));
+    auto nc_term = map_get(env, term, "num_clusters");
+    if (nc_term) num_clusters = static_cast<int>(term_to_int(env, nc_term));
+    auto m_term = map_get(env, term, "m");
+    if (m_term) m = static_cast<int>(term_to_int(env, m_term));
+    auto ef_term = map_get(env, term, "ef_construction");
+    if (ef_term) ef_construction = static_cast<int>(term_to_int(env, ef_term));
+    return std::make_shared<zvec::HnswRabitqIndexParams>(
+        metric, total_bits, num_clusters, m, ef_construction);
   }
 
   throw std::invalid_argument("unknown index type: " + type_str);
@@ -560,6 +578,11 @@ static zvec::VectorQuery decode_vector_query(ErlNifEnv *env,
         q.query_params_ = std::make_shared<zvec::IVFQueryParams>(nprobe);
       } else if (type_str == "flat") {
         q.query_params_ = std::make_shared<zvec::FlatQueryParams>();
+      } else if (type_str == "hnsw_rabitq") {
+        int ef = 200;
+        auto ef_term = map_get(env, qp_term, "ef");
+        if (ef_term) ef = static_cast<int>(term_to_int(env, ef_term));
+        q.query_params_ = std::make_shared<zvec::HnswRabitqQueryParams>(ef);
       }
     }
   }
