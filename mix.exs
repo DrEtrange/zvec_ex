@@ -1,7 +1,42 @@
+defmodule Zvec.Precompiler do
+  @moduledoc false
+
+  @all_targets ["aarch64-apple-darwin"]
+
+  def all_supported_targets(:fetch), do: @all_targets
+
+  def all_supported_targets(:compile) do
+    case current_target() do
+      {:ok, target} -> [target]
+      _ -> []
+    end
+  end
+
+  def current_target do
+    system_arch = to_string(:erlang.system_info(:system_architecture))
+
+    cond do
+      system_arch =~ ~r/aarch64.*apple.*darwin/ -> {:ok, "aarch64-apple-darwin"}
+      true -> {:error, "unsupported target: #{system_arch}"}
+    end
+  end
+
+  def build_native(args), do: ElixirMake.Precompiler.mix_compile(args)
+
+  def precompile(args, _target) do
+    case ElixirMake.Precompiler.mix_compile(args) do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  def unavailable_target(_target), do: :compile
+end
+
 defmodule Zvec.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/nyo16/zvec_ex"
 
   def project do
@@ -10,8 +45,15 @@ defmodule Zvec.MixProject do
       version: @version,
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
-      compilers: [:elixir_make] ++ Mix.compilers(),
+      compilers: Mix.compilers() ++ [:elixir_make],
       make_env: fn -> %{"FINE_INCLUDE_DIR" => Fine.include_dir()} end,
+      make_clean: ["clean"],
+      make_precompiler: {:nif, Zvec.Precompiler},
+      make_precompiler_url:
+        "https://github.com/nyo16/zvec_ex/releases/download/v#{@version}/@{artefact_filename}",
+      make_precompiler_filename: "libzvec_nif",
+      make_precompiler_priv_paths: ["libzvec_nif.so"],
+      make_precompiler_nif_versions: [versions: ["2.17", "2.18"]],
       deps: deps(),
       package: package(),
       description: "Elixir NIF bindings for zvec, an in-process vector database from Alibaba.",
@@ -42,7 +84,8 @@ defmodule Zvec.MixProject do
         "GitHub" => @source_url,
         "zvec" => "https://github.com/alibaba/zvec"
       },
-      files: ~w(lib c_src/zvec_nif.cpp Makefile mix.exs README.md LICENSE .formatter.exs)
+      files:
+        ~w(lib c_src/zvec_nif.cpp Makefile mix.exs README.md LICENSE .formatter.exs checksum.exs)
     ]
   end
 

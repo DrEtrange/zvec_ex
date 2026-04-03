@@ -39,9 +39,11 @@ CXXFLAGS += -I$(ZVEC_SRC)/thirdparty/magic_enum/magic_enum-0.9.7/include
 ZVEC_FORCE_LIBS = \
 	$(ZVEC_LIB)/libzvec_db.a \
 	$(ZVEC_LIB)/libzvec_core.a \
+	$(ZVEC_LIB)/libzvec_turbo.a \
 	$(ZVEC_LIB)/libzvec_ailego.a
 
 # Third-party static libs
+# NOTE: In zvec 0.3.0, antlr4 is output to dist/ instead of external/usr/local/lib/
 THIRDPARTY_LIBS = \
 	$(ZVEC_EXT_LIB)/librocksdb.a \
 	$(ZVEC_EXT_LIB)/libarrow.a \
@@ -50,7 +52,7 @@ THIRDPARTY_LIBS = \
 	$(ZVEC_EXT_LIB)/libarrow_dataset.a \
 	$(ZVEC_EXT_LIB)/libparquet.a \
 	$(ZVEC_EXT_LIB)/libarrow_bundled_dependencies.a \
-	$(ZVEC_EXT_LIB)/libantlr4-runtime.a \
+	$(ZVEC_SRC)/dist/libantlr4-runtime.a \
 	$(ZVEC_EXT_LIB)/libprotobuf.a \
 	$(ZVEC_EXT_LIB)/libglog.a \
 	$(ZVEC_EXT_LIB)/libgflags_nothreads.a \
@@ -76,8 +78,10 @@ endif
 CMAKE_FLAGS = \
 	-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 	-DBUILD_PYTHON_BINDINGS=OFF \
+	-DBUILD_C_BINDINGS=OFF \
 	-DBUILD_TOOLS=OFF \
 	-DCMAKE_BUILD_TYPE=Release \
+	-DRABITQ_ENABLE_AVX512=OFF \
 	-DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
 .PHONY: all clean
@@ -86,11 +90,12 @@ all: $(NIF_SO)
 
 # Stage 1: Clone zvec if needed
 $(ZVEC_SRC)/CMakeLists.txt:
-	git clone --recurse-submodules --depth 1 \
+	git clone --branch v0.3.0 --recurse-submodules --depth 1 \
 		https://github.com/alibaba/zvec.git $(ZVEC_SRC)
 
 # Stage 1b: Patch antlr4 CMakeLists for modern CMake compatibility
 $(ZVEC_SRC)/.patched: $(ZVEC_SRC)/CMakeLists.txt
+	@touch $(ZVEC_SRC)/thirdparty/antlr/antlr4/.antlr4_fix_patched
 	@if grep -q "CMP0054 OLD" $(ZVEC_SRC)/thirdparty/antlr/antlr4/runtime/Cpp/CMakeLists.txt 2>/dev/null; then \
 		sed -i.bak \
 			-e '/CMP0045 OLD/d' \

@@ -22,6 +22,7 @@ defmodule Zvec.Query do
     * `:include_vector` - whether to include vectors in results (default: false)
     * `:output_fields` - list of field names to include in results
     * `:query_params` - search params map, e.g. `%{type: :hnsw, ef: 200}`
+      Supported types: `:hnsw`, `:flat`, `:ivf`, `:hnsw_rabitq`
   """
   @spec vector(String.t(), [float()] | binary(), keyword()) :: map()
   def vector(field_name, vector, opts \\ []) do
