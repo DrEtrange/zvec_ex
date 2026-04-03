@@ -95,6 +95,7 @@ $(ZVEC_SRC)/CMakeLists.txt:
 
 # Stage 1b: Patch antlr4 CMakeLists for modern CMake compatibility
 $(ZVEC_SRC)/.patched: $(ZVEC_SRC)/CMakeLists.txt
+	@touch $(ZVEC_SRC)/thirdparty/antlr/antlr4/.antlr4_fix_patched
 	@if grep -q "CMP0054 OLD" $(ZVEC_SRC)/thirdparty/antlr/antlr4/runtime/Cpp/CMakeLists.txt 2>/dev/null; then \
 		sed -i.bak \
 			-e '/CMP0045 OLD/d' \
