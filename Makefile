@@ -9,6 +9,10 @@
 PRIV_DIR = $(MIX_APP_PATH)/priv
 NIF_SO   = $(PRIV_DIR)/libzvec_nif.so
 
+# Allow cmake to be overridden via environment (useful in sandboxed build
+# environments like Nix where cmake may not be on the default PATH).
+CMAKE ?= cmake
+
 # zvec paths
 ZVEC_SRC     = c_src/zvec_vendor
 ZVEC_BUILD   = $(ZVEC_SRC)/build
@@ -111,11 +115,11 @@ $(ZVEC_SRC)/.patched: $(ZVEC_SRC)/CMakeLists.txt
 $(ZVEC_BUILD)/Makefile: $(ZVEC_SRC)/.patched
 	mkdir -p $(ZVEC_BUILD) && \
 	cd $(ZVEC_BUILD) && \
-	cmake .. $(CMAKE_FLAGS)
+	$(CMAKE) .. $(CMAKE_FLAGS)
 
 # Stage 1d: CMake build (only runs once, stamp file tracks completion)
 $(ZVEC_BUILD)/.built: $(ZVEC_BUILD)/Makefile
-	cmake --build $(ZVEC_BUILD) -j$$(sysctl -n hw.ncpu 2>/dev/null || nproc)
+	$(CMAKE) --build $(ZVEC_BUILD) -j$$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 	touch $@
 
 # Stage 2: Compile and link NIF

@@ -1,6 +1,7 @@
 #include <fine.hpp>
 
 #include <zvec/db/collection.h>
+#include <zvec/db/config.h>
 #include <zvec/db/doc.h>
 #include <zvec/db/index_params.h>
 #include <zvec/db/options.h>
@@ -996,4 +997,18 @@ FINE_NIF(collection_optimize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 // ---------------------------------------------------------------------------
 // Module init
 // ---------------------------------------------------------------------------
+
+// zvec::GlobalConfig::Initialize() must be called before any Collection
+// operation. The Python bindings require callers to invoke zvec.init()
+// explicitly, but Elixir NIFs are loaded implicitly by the BEAM — so we
+// call it here via a static constructor that runs when the .so is dlopen'd.
+static struct ZvecAutoInit {
+  ZvecAutoInit() {
+    zvec::GlobalConfig::ConfigData cfg{};
+    // Ignore the return value: Initialize() is idempotent (no-op on second
+    // call) and the only failure mode is "already initialized", which is fine.
+    (void)zvec::GlobalConfig::Instance().Initialize(cfg);
+  }
+} _zvec_auto_init;
+
 FINE_INIT("Elixir.Zvec.Native");

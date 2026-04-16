@@ -46,7 +46,10 @@ defmodule Zvec.MixProject do
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       compilers: Mix.compilers() ++ [:elixir_make],
-      make_env: fn -> %{"FINE_INCLUDE_DIR" => Fine.include_dir()} end,
+      make_env: fn ->
+        cmake = System.find_executable("cmake") || "cmake"
+        %{"FINE_INCLUDE_DIR" => Fine.include_dir(), "CMAKE" => cmake}
+      end,
       make_clean: ["clean"],
       make_precompiler: {:nif, Zvec.Precompiler},
       make_precompiler_url:
