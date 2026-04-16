@@ -796,6 +796,9 @@ ResultRef collection_create_and_open(ErlNifEnv *env, std::string path,
   if (!result.has_value()) {
     return status_to_error(result.error());
   }
+  if (!result.has_value()) {
+    return status_to_error(result.error());
+  }
 
   auto resource = fine::make_resource<CollectionResource>(std::move(result).value());
   return OkRef(std::move(resource));
@@ -1000,15 +1003,18 @@ FINE_NIF(collection_optimize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 // zvec::GlobalConfig::Initialize() must be called before any Collection
 // operation. The Python bindings require callers to invoke zvec.init()
-// explicitly, but Elixir NIFs are loaded implicitly by the BEAM — so we
-// call it here via a static constructor that runs when the .so is dlopen'd.
-static struct ZvecAutoInit {
-  ZvecAutoInit() {
-    zvec::GlobalConfig::ConfigData cfg{};
-    // Ignore the return value: Initialize() is idempotent (no-op on second
-    // call) and the only failure mode is "already initialized", which is fine.
-    (void)zvec::GlobalConfig::Instance().Initialize(cfg);
-  }
-} _zvec_auto_init;
+// explicitly, but Elixir NIFs are loaded implicitly by the BEAM.
+//
+// We register a fine load callback so that Initialize() is called AFTER the
+// .so is fully loaded by the BEAM. This is critical: Initialize() spawns
+// C++ thread pools, and spawning threads from inside a static constructor
+// (i.e. during dlopen) deadlocks on macOS due to the dyld lock.
+static fine::Registration _zvec_load_reg = fine::Registration::register_load(
+    [](ErlNifEnv *, void **, fine::Term) {
+      zvec::GlobalConfig::ConfigData cfg{};
+      // Ignore the return value: Initialize() is idempotent and the only
+      // failure mode is "already initialized", which is fine.
+      (void)zvec::GlobalConfig::Instance().Initialize(cfg);
+    });
 
 FINE_INIT("Elixir.Zvec.Native");
