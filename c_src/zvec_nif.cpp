@@ -1,5 +1,8 @@
 #include <fine.hpp>
 
+#include <rocksdb/db.h>
+#include <rocksdb/env.h>
+#include <rocksdb/options.h>
 #include <zvec/db/collection.h>
 #include <zvec/db/config.h>
 #include <zvec/db/doc.h>
@@ -11,9 +14,11 @@
 #include <zvec/db/status.h>
 #include <zvec/db/type.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -792,7 +797,11 @@ ResultRef collection_create_and_open(ErlNifEnv *env, std::string path,
   auto schema = decode_schema(env, schema_term);
   auto options = decode_options(env, options_term);
 
+  fprintf(stderr, "[zvec_debug] collection_create_and_open: calling CreateAndOpen\n");
+  fflush(stderr);
   auto result = zvec::Collection::CreateAndOpen(path, schema, options);
+  fprintf(stderr, "[zvec_debug] CreateAndOpen returned, has_value=%d\n", result.has_value());
+  fflush(stderr);
   if (!result.has_value()) {
     return status_to_error(result.error());
   }
@@ -1003,18 +1012,89 @@ FINE_NIF(collection_optimize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 // zvec::GlobalConfig::Initialize() must be called before any Collection
 // operation. The Python bindings require callers to invoke zvec.init()
-// explicitly, but Elixir NIFs are loaded implicitly by the BEAM.
-//
-// We register a fine load callback so that Initialize() is called AFTER the
-// .so is fully loaded by the BEAM. This is critical: Initialize() spawns
-// C++ thread pools, and spawning threads from inside a static constructor
-// (i.e. during dlopen) deadlocks on macOS due to the dyld lock.
-static fine::Registration _zvec_load_reg = fine::Registration::register_load(
-    [](ErlNifEnv *, void **, fine::Term) {
+// explicitly. We expose the same mechanism as a NIF so Elixir callers can
+// call Zvec.init() before any collection operations. This avoids spawning
+// threads during dlopen (static constructors) or during the BEAM's NIF load
+// callback, both of which can deadlock on macOS.
+ResultOk zvec_global_config_initialize(ErlNifEnv *env) {
+  fprintf(stderr, "[zvec_debug] zvec_global_config_initialize: calling Initialize\n");
+  fflush(stderr);
+  zvec::GlobalConfig::ConfigData cfg{};
+  auto status = zvec::GlobalConfig::Instance().Initialize(cfg);
+  fprintf(stderr, "[zvec_debug] zvec_global_config_initialize: Initialize returned, ok=%d\n", status.ok());
+  fflush(stderr);
+  if (!status.ok()) {
+    return status_to_error(status);
+  }
+  return OkNothing{};
+}
+FINE_NIF(zvec_global_config_initialize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+
+// Pre-warm zvec and RocksDB global resources during NIF load, before any BEAM
+// scheduler threads are active.  On macOS, pthread_create called from within a
+// dirty NIF deadlocks when other BEAM scheduler threads hold OS-level locks.
+// By creating these threads here (in the ERL_NIF load callback, which runs
+// before any BEAM processes are spawned), we avoid the deadlock.
+static const auto _zvec_load_registration = fine::Registration::register_load(
+    [](ErlNifEnv *, void **, ERL_NIF_TERM) -> int {
+      fprintf(stderr, "[zvec_debug] register_load callback: starting\n");
+      fflush(stderr);
+      // 1. Initialize zvec GlobalConfig (creates ailego thread pools).
       zvec::GlobalConfig::ConfigData cfg{};
-      // Ignore the return value: Initialize() is idempotent and the only
-      // failure mode is "already initialized", which is fine.
-      (void)zvec::GlobalConfig::Instance().Initialize(cfg);
+      auto status = zvec::GlobalConfig::Instance().Initialize(cfg);
+      if (!status.ok()) {
+        fprintf(stderr, "[zvec] GlobalConfig::Initialize failed: %d\n",
+                static_cast<int>(status.code()));
+        // Don't abort: already-initialized returns ok, other errors may still
+        // allow the NIF to function (Zvec.init() NIF will surface the error).
+      }
+
+      // 2. Force RocksDB's global Env thread pools to start NOW (before BEAM
+      //    processes run).  DB::Open() will reuse these threads instead of
+      //    calling pthread_create itself, avoiding the macOS deadlock.
+      uint32_t cpu_count =
+          std::max(1u, std::thread::hardware_concurrency());
+      rocksdb::Env::Default()->SetBackgroundThreads(
+          static_cast<int>(cpu_count), rocksdb::Env::LOW);
+      fprintf(stderr, "[zvec_debug] register_load: SetBackgroundThreads(LOW) done\n");
+      fflush(stderr);
+      rocksdb::Env::Default()->SetBackgroundThreads(1, rocksdb::Env::HIGH);
+      fprintf(stderr, "[zvec_debug] register_load: SetBackgroundThreads(HIGH) done\n");
+      fflush(stderr);
+
+      // 3. Open a dummy RocksDB DB to force ALL lazy initialization (timer
+      //    threads, periodic task scheduler, ThreadLocalPtr, etc.) to happen
+      //    NOW — before any BEAM processes are running — to avoid the macOS
+      //    pthread_create deadlock that occurs when DB::Open() is called from
+      //    a dirty NIF thread while other BEAM processes are alive.
+      {
+        char tmp_template[] = "/tmp/zvec_warmup_XXXXXX";
+        char* tmp_dir = mkdtemp(tmp_template);
+        if (tmp_dir) {
+          fprintf(stderr, "[zvec_debug] register_load: opening dummy RocksDB at %s\n", tmp_dir);
+          fflush(stderr);
+          rocksdb::Options opts;
+          opts.create_if_missing = true;
+          opts.info_log_level = rocksdb::FATAL_LEVEL;
+          rocksdb::DB* db = nullptr;
+          auto s = rocksdb::DB::Open(opts, std::string(tmp_dir), &db);
+          if (s.ok() && db) {
+            delete db;
+            fprintf(stderr, "[zvec_debug] register_load: dummy RocksDB open+close OK\n");
+          } else {
+            fprintf(stderr, "[zvec_debug] register_load: dummy RocksDB open failed: %s\n", s.ToString().c_str());
+          }
+          fflush(stderr);
+          // Leave /tmp/zvec_warmup_* behind; OS cleans /tmp on reboot.
+        } else {
+          fprintf(stderr, "[zvec_debug] register_load: mkdtemp failed, skipping dummy DB\n");
+          fflush(stderr);
+        }
+      }
+
+      fprintf(stderr, "[zvec_debug] register_load callback: done\n");
+      fflush(stderr);
+      return 0;
     });
 
 FINE_INIT("Elixir.Zvec.Native");

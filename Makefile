@@ -21,6 +21,7 @@ ZVEC_EXT_LIB = $(ZVEC_BUILD)/external/usr/local/lib
 ZVEC_INC     = $(ZVEC_SRC)/src/include
 ZVEC_SRC_INC = $(ZVEC_SRC)/src
 ZVEC_EXT_INC = $(ZVEC_BUILD)/external/usr/local/include
+ZVEC_ROCKSDB_INC = $(ZVEC_SRC)/thirdparty/rocksdb/rocksdb-8.1.1/include
 
 # Compiler
 CXX ?= c++
@@ -28,7 +29,7 @@ CXXFLAGS = -std=c++17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Wno-unused-pa
 
 # Include paths
 CXXFLAGS += -I$(ERTS_INCLUDE_DIR) -I$(FINE_INCLUDE_DIR)
-CXXFLAGS += -I$(ZVEC_INC) -I$(ZVEC_SRC_INC) -I$(ZVEC_EXT_INC)
+CXXFLAGS += -I$(ZVEC_INC) -I$(ZVEC_SRC_INC) -I$(ZVEC_EXT_INC) -I$(ZVEC_ROCKSDB_INC)
 # antlr4 runtime headers
 CXXFLAGS += -I$(ZVEC_SRC)/thirdparty/antlr/antlr4/runtime/Cpp/runtime/src
 # sparsehash headers
