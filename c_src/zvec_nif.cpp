@@ -1010,26 +1010,6 @@ FINE_NIF(collection_optimize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 // Module init
 // ---------------------------------------------------------------------------
 
-// zvec::GlobalConfig::Initialize() must be called before any Collection
-// operation. The Python bindings require callers to invoke zvec.init()
-// explicitly. We expose the same mechanism as a NIF so Elixir callers can
-// call Zvec.init() before any collection operations. This avoids spawning
-// threads during dlopen (static constructors) or during the BEAM's NIF load
-// callback, both of which can deadlock on macOS.
-ResultOk zvec_global_config_initialize(ErlNifEnv *env) {
-  fprintf(stderr, "[zvec_debug] zvec_global_config_initialize: calling Initialize\n");
-  fflush(stderr);
-  zvec::GlobalConfig::ConfigData cfg{};
-  auto status = zvec::GlobalConfig::Instance().Initialize(cfg);
-  fprintf(stderr, "[zvec_debug] zvec_global_config_initialize: Initialize returned, ok=%d\n", status.ok());
-  fflush(stderr);
-  if (!status.ok()) {
-    return status_to_error(status);
-  }
-  return OkNothing{};
-}
-FINE_NIF(zvec_global_config_initialize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
-
 // Pre-warm zvec and RocksDB global resources during NIF load, before any BEAM
 // scheduler threads are active.  On macOS, pthread_create called from within a
 // dirty NIF deadlocks when other BEAM scheduler threads hold OS-level locks.
