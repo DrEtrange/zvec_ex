@@ -98,7 +98,12 @@ $(ZVEC_SRC)/CMakeLists.txt:
 	git clone --branch v0.3.0 --recurse-submodules --depth 1 \
 		https://github.com/alibaba/zvec.git $(ZVEC_SRC)
 
-# Stage 1b: Patch antlr4 CMakeLists for modern CMake compatibility
+ROCKSDB_CTX = $(ZVEC_SRC)/src/db/common/rocbsdb_context.cc
+
+# Stage 1b: Patch antlr4 CMakeLists for modern CMake compatibility and disable
+# RocksDB statistics to prevent EXC_BREAKPOINT / SIGTRAP in
+# StatisticsImpl::recordInHistogram when DB::Open is called from a dirty NIF
+# scheduler thread on macOS.
 $(ZVEC_SRC)/.patched: $(ZVEC_SRC)/CMakeLists.txt
 	@touch $(ZVEC_SRC)/thirdparty/antlr/antlr4/.antlr4_fix_patched
 	@if grep -q "CMP0054 OLD" $(ZVEC_SRC)/thirdparty/antlr/antlr4/runtime/Cpp/CMakeLists.txt 2>/dev/null; then \
@@ -112,8 +117,17 @@ $(ZVEC_SRC)/.patched: $(ZVEC_SRC)/CMakeLists.txt
 	fi
 	touch $@
 
-# Stage 1c: CMake configure
-$(ZVEC_BUILD)/Makefile: $(ZVEC_SRC)/.patched
+# Stage 1c: Apply RocksDB statistics patch (disable statistics to prevent SIGTRAP on macOS)
+$(ZVEC_SRC)/.rocksdb_patched: $(ZVEC_SRC)/.patched
+	@if grep -q "CreateDBStatistics" $(ROCKSDB_CTX) 2>/dev/null; then \
+		sed -i.bak \
+			-e 's/create_opts_.statistics = rocksdb::CreateDBStatistics();/create_opts_.stats_dump_period_sec = 0;\n  create_opts_.stats_persist_period_sec = 0;\n  create_opts_.statistics = nullptr; \/\/ disabled: causes SIGTRAP on macOS dirty NIF scheduler/' \
+			$(ROCKSDB_CTX); \
+	fi
+	touch $@
+
+# Stage 1d: CMake configure
+$(ZVEC_BUILD)/Makefile: $(ZVEC_SRC)/.rocksdb_patched
 	mkdir -p $(ZVEC_BUILD) && \
 	cd $(ZVEC_BUILD) && \
 	$(CMAKE) .. $(CMAKE_FLAGS)
