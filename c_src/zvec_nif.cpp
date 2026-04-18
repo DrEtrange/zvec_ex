@@ -797,11 +797,7 @@ ResultRef collection_create_and_open(ErlNifEnv *env, std::string path,
   auto schema = decode_schema(env, schema_term);
   auto options = decode_options(env, options_term);
 
-  fprintf(stderr, "[zvec_debug] collection_create_and_open: calling CreateAndOpen\n");
-  fflush(stderr);
   auto result = zvec::Collection::CreateAndOpen(path, schema, options);
-  fprintf(stderr, "[zvec_debug] CreateAndOpen returned, has_value=%d\n", result.has_value());
-  fflush(stderr);
   if (!result.has_value()) {
     return status_to_error(result.error());
   }
@@ -1017,8 +1013,6 @@ FINE_NIF(collection_optimize, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 // before any BEAM processes are spawned), we avoid the deadlock.
 static const auto _zvec_load_registration = fine::Registration::register_load(
     [](ErlNifEnv *, void **, ERL_NIF_TERM) -> int {
-      fprintf(stderr, "[zvec_debug] register_load callback: starting\n");
-      fflush(stderr);
       // 1. Initialize zvec GlobalConfig (creates ailego thread pools).
       zvec::GlobalConfig::ConfigData cfg{};
       auto status = zvec::GlobalConfig::Instance().Initialize(cfg);
@@ -1026,7 +1020,7 @@ static const auto _zvec_load_registration = fine::Registration::register_load(
         fprintf(stderr, "[zvec] GlobalConfig::Initialize failed: %d\n",
                 static_cast<int>(status.code()));
         // Don't abort: already-initialized returns ok, other errors may still
-        // allow the NIF to function (Zvec.init() NIF will surface the error).
+        // allow the NIF to function.
       }
 
       // 2. Force RocksDB's global Env thread pools to start NOW (before BEAM
@@ -1036,11 +1030,7 @@ static const auto _zvec_load_registration = fine::Registration::register_load(
           std::max(1u, std::thread::hardware_concurrency());
       rocksdb::Env::Default()->SetBackgroundThreads(
           static_cast<int>(cpu_count), rocksdb::Env::LOW);
-      fprintf(stderr, "[zvec_debug] register_load: SetBackgroundThreads(LOW) done\n");
-      fflush(stderr);
       rocksdb::Env::Default()->SetBackgroundThreads(1, rocksdb::Env::HIGH);
-      fprintf(stderr, "[zvec_debug] register_load: SetBackgroundThreads(HIGH) done\n");
-      fflush(stderr);
 
       // 3. Open a dummy RocksDB DB to force ALL lazy initialization (timer
       //    threads, periodic task scheduler, ThreadLocalPtr, etc.) to happen
@@ -1051,8 +1041,6 @@ static const auto _zvec_load_registration = fine::Registration::register_load(
         char tmp_template[] = "/tmp/zvec_warmup_XXXXXX";
         char* tmp_dir = mkdtemp(tmp_template);
         if (tmp_dir) {
-          fprintf(stderr, "[zvec_debug] register_load: opening dummy RocksDB at %s\n", tmp_dir);
-          fflush(stderr);
           rocksdb::Options opts;
           opts.create_if_missing = true;
           opts.info_log_level = rocksdb::FATAL_LEVEL;
@@ -1060,20 +1048,14 @@ static const auto _zvec_load_registration = fine::Registration::register_load(
           auto s = rocksdb::DB::Open(opts, std::string(tmp_dir), &db);
           if (s.ok() && db) {
             delete db;
-            fprintf(stderr, "[zvec_debug] register_load: dummy RocksDB open+close OK\n");
           } else {
-            fprintf(stderr, "[zvec_debug] register_load: dummy RocksDB open failed: %s\n", s.ToString().c_str());
+            fprintf(stderr, "[zvec] register_load: dummy RocksDB warmup failed: %s\n",
+                    s.ToString().c_str());
           }
-          fflush(stderr);
           // Leave /tmp/zvec_warmup_* behind; OS cleans /tmp on reboot.
-        } else {
-          fprintf(stderr, "[zvec_debug] register_load: mkdtemp failed, skipping dummy DB\n");
-          fflush(stderr);
         }
       }
 
-      fprintf(stderr, "[zvec_debug] register_load callback: done\n");
-      fflush(stderr);
       return 0;
     });
 
